@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: nickk8sreg.azurecr.io
+        username: ${{ secrets.acr_nickk8sreg_username }}
+        password: ${{ secrets.acr_nickk8sreg_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/" -f  "Dockerfile" -t nickk8sreg.azurecr.io/nick8s:${{ github.sha }}
+        docker push nickk8sreg.azurecr.io/nick8s:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_nick8s_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep nick8s_gowebdemo | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace nick8s_gowebdemo`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: nick8s_gowebdemo
+        container-registry-url: nickk8sreg.azurecr.io
+        container-registry-username: ${{ secrets.acr_nickk8sreg_username }}
+        container-registry-password: ${{ secrets.acr_nickk8sreg_password }}
+        secret-name: nick8sdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: nick8s_gowebdemo
+        manifests: |
+          manifests/deployment-1.yml
+          manifests/service-1.yml
+        images: |
+          nickk8sreg.azurecr.io/nick8s:${{ github.sha }}
+        imagepullsecrets: |
+          nick8sdockerauth
